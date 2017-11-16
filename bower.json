@@ -1,0 +1,15 @@
+{
+  "name": "purescript-valence-sparql",
+  "ignore": [
+    "**/.*",
+    "node_modules",
+    "bower_components",
+    "output"
+  ],
+  "dependencies": {
+    "purescript-string-parsers": "^3.0.1"
+  },
+  "devDependencies": {
+    "purescript-spec-quickcheck": "^2.0.0"
+  }
+}
