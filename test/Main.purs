@@ -9,8 +9,9 @@ import Data.Char (fromCharCode, toCharCode)
 import Data.Either (Either(..), isLeft)
 import Data.List.Lazy (fold, replicateM)
 import Data.NonEmpty ((:|))
-import Data.String (drop, singleton)
-import Test.QuickCheck (class Arbitrary, Result(..), arbitrary, quickCheck, (===))
+import Data.String (singleton)
+import Data.String.Gen (genDigitString)
+import Test.QuickCheck (class Arbitrary, arbitrary, quickCheck, (===))
 import Test.QuickCheck.Gen (Gen, elements)
 import Test.Spec (describe, it)
 import Test.Spec.Assertions (shouldEqual)
@@ -18,7 +19,7 @@ import Test.Spec.QuickCheck (QCRunnerEffects)
 import Test.Spec.Reporter (consoleReporter)
 import Test.Spec.Runner (run)
 import Text.Parsing.StringParser (runParser)
-import Valence.SPARQL.Parser (hex, percent, plx, pn_chars, pn_chars_base, pn_chars_u, pn_local_esc, varname)
+import Valence.SPARQL.Parser (anon, echar, hex, nil, percent, plx, pn_chars, pn_chars_base, pn_chars_u, pn_local, pn_local_esc, varname, ws)
 
 
 newtype ArbitraryPnLocalEsc = ArbitraryPnLocalEsc String 
@@ -120,6 +121,77 @@ instance arbitraryPnChars :: Arbitrary ArbitraryPnChars where
        3 -> singleton <$> fromCharCode <$> intBetweenChars '\x0300' '\x036F'
        _ -> singleton <$> fromCharCode <$> intBetweenChars '\x203F' '\x2040'
 
+newtype ArbitraryPnPrefix = ArbitraryPnPrefix String
+
+instance arbitraryPnPrefix :: Arbitrary ArbitraryPnPrefix where
+  arbitrary = ArbitraryPnPrefix <$> do
+    b <- arbitrary <#> (\(ArbitraryPnCharBase b) -> b)
+    i <- chooseInt 0 10
+    cs <- replicateM i (arbitrary >>= 
+            if _ 
+            then pure "." 
+            else arbitrary <#> (\(ArbitraryPnChars c) -> c)) 
+    case i of 
+      0 -> pure b
+      _ -> arbitrary <#> (\(ArbitraryPnChars c) -> b <> c <> (fold cs))
+      
+
+newtype ArbitraryPnLocal = ArbitraryPnLocal String
+
+instance arbitraryPnLocal :: Arbitrary ArbitraryPnLocal where
+  arbitrary = do
+    i         <- chooseInt 0 3
+    firstPart <- case i of 
+                  0 -> arbitrary <#> (\(ArbitraryPnCharsU c) -> c)
+                  1 -> arbitrary <#> (\(ArbitraryPlx c) -> c) 
+                  2 -> genDigitString 
+                  _ -> pure ":" 
+    n <- chooseInt 0 10
+    midPart   <-  fold <$> replicateM n (do
+                      n1 <- chooseInt 0 3 
+                      case n1 of 
+                        0 -> arbitrary <#> (\(ArbitraryPnChars c) -> c)
+                        1 -> arbitrary <#> (\(ArbitraryPlx c) -> c) 
+                        2 -> pure "."
+                        _ -> pure ":")
+    endPart   <- case n of 
+                  0 -> pure ""
+                  _ -> do 
+                        n2 <- chooseInt 0 2
+                        case n2 of 
+                          0 -> arbitrary <#> (\(ArbitraryPnChars c) -> c)
+                          1 -> arbitrary <#> (\(ArbitraryPlx p) -> p)
+                          _ -> pure ":"
+    pure $ ArbitraryPnLocal (firstPart <> midPart <> endPart)
+    
+
+newtype ArbitraryWS = ArbitraryWS String
+
+instance arbitraryWS :: Arbitrary ArbitraryWS where
+  arbitrary = ArbitraryWS <$> singleton <$> elements ('\x0020' :| ['\x0009','\x000D', '\x000A'])
+
+newtype ArbitraryAnon = ArbitraryAnon String
+
+instance arbitraryAnon :: Arbitrary ArbitraryAnon where
+  arbitrary = do
+    i <- chooseInt 0 20
+    w <- replicateM i (arbitrary <#> (\(ArbitraryWS w) -> w) )
+    pure (ArbitraryAnon ("[" <> (fold w) <> "]"))
+
+newtype ArbitraryNil = ArbitraryNil String
+
+instance arbitraryNil :: Arbitrary ArbitraryNil where
+  arbitrary = do
+    i <- chooseInt 0 20
+    w <- replicateM i (arbitrary <#> (\(ArbitraryWS w) -> w) )
+    pure (ArbitraryNil ("(" <> (fold w) <> ")"))
+
+newtype AEChar = AEChar String 
+
+instance aEChar :: Arbitrary AEChar where
+  arbitrary = do
+    c <- elements ("t" :| ["b", "r", "f", "\"", "'"])
+    pure $ AEChar ("\\" <> c)
 
 
 main :: Eff (QCRunnerEffects () ) Unit  
@@ -139,7 +211,7 @@ main = run [consoleReporter] do
         liftEff' ( quickCheck (\(ArbitraryPnLocalEsc pn) -> (runParser pn_local_esc pn ) === (Right pn)))
 
     describe "parses [172] HEX" do
-      it "should runParser common case" do
+      it "should parse common case" do
         (runParser hex "0") `shouldEqual` (Right "0")
         (runParser hex "a") `shouldEqual` (Right "a")
         (runParser hex "f") `shouldEqual` (Right "f")
@@ -154,13 +226,13 @@ main = run [consoleReporter] do
       it "should pass quickCheck" do
         liftEff' (quickCheck (\(ArbitraryHex h) -> (runParser hex h) === (Right h))) 
 
-    describe "runParser [171] PERCENT" do
-      it "should runParser the common case" do
-        (runParser percent "%00") `shouldEqual` (Right "00")
-        (runParser percent "%a0") `shouldEqual` (Right "a0")
-        (runParser percent "%A0") `shouldEqual` (Right "A0")
-        (runParser percent "%af") `shouldEqual` (Right "af")
-        (runParser percent "%AF") `shouldEqual` (Right "AF")
+    describe "parse [171] PERCENT" do
+      it "should parse the common case" do
+        (runParser percent "%00") `shouldEqual` (Right "%00")
+        (runParser percent "%a0") `shouldEqual` (Right "%a0")
+        (runParser percent "%A0") `shouldEqual` (Right "%A0")
+        (runParser percent "%af") `shouldEqual` (Right "%af")
+        (runParser percent "%AF") `shouldEqual` (Right "%AF")
 
       it "should fail on some invalid input" do
         (isLeft $ (runParser percent "%a")) `shouldEqual` true
@@ -168,24 +240,21 @@ main = run [consoleReporter] do
         (isLeft $ (runParser percent "af")) `shouldEqual` true
 
       it "should pass quickCheck" do
-        liftEff' (quickCheck (\(ArbitraryPercent p) -> (runParser percent p) === (Right (drop 1 p))))
+        liftEff' (quickCheck (\(ArbitraryPercent p) -> (runParser percent p) === (Right p)))
 
-    describe "runParser [170] plx" do
-      it "should runParser the common case" do 
+    describe "parse [170] plx" do
+      it "should parse the common case" do 
         (runParser plx "\\_")  `shouldEqual` (Right "\\_")
-        (runParser plx "%00")  `shouldEqual` (Right "00")
+        (runParser plx "%00")  `shouldEqual` (Right "%00")
 
       it "should fail on invalid input" do
         (isLeft $ (runParser plx "_")) `shouldEqual` true
         (isLeft $ (runParser plx "00")) `shouldEqual` true
 
       it "should pass quickCheck" do
-        liftEff' (quickCheck (\(ArbitraryPlx p) -> (case ((runParser plx p)  === (Right p)) of
-          Failed _ -> (runParser plx p) === (Right (drop 1 p))
-          Success  -> Success)))
-
-    describe "runParser [164] pn_char_base" do
-      it "should runParser some base character" do
+        liftEff' (quickCheck (\(ArbitraryPlx p) -> (runParser plx p)  === (Right p))) 
+    describe "parse [164] pn_char_base" do
+      it "should parse some base character" do
         (runParser pn_chars_base "a") `shouldEqual` (Right "a")
 
       it "should fail on invalid input" do 
@@ -194,8 +263,8 @@ main = run [consoleReporter] do
       it "should pass quickCheck" do
         liftEff' (quickCheck (\(ArbitraryPnCharBase c) -> (runParser pn_chars_base c) === (Right c)))
 
-    describe "runParser [165] pn_chars_u" do 
-      it "should runParser some valid characters" do
+    describe "parse [165] pn_chars_u" do 
+      it "should parse some valid characters" do
         (runParser pn_chars_u "a") `shouldEqual` (Right "a")
         (runParser pn_chars_u "_") `shouldEqual` (Right "_")
 
@@ -205,8 +274,8 @@ main = run [consoleReporter] do
       it "should pass quickCheck" do
         liftEff' (quickCheck (\(ArbitraryPnCharsU c) -> (runParser pn_chars_u c) === (Right c)))
 
-    describe "runParser [166] varname" do
-      it "should runParser some valid input" do 
+    describe "parse [166] varname" do
+      it "should parse some valid input" do 
         (runParser varname "asdf") `shouldEqual` (Right "asdf")
         (runParser varname "9asdf") `shouldEqual` (Right "9asdf")
         (runParser varname "9\x00B7\x0300\x203F") `shouldEqual` (Right "9\x00B7\x0300\x203F")
@@ -217,8 +286,8 @@ main = run [consoleReporter] do
       it "should pass quickCheck" do
         liftEff' (quickCheck (\(ArbitraryVarname v) -> (runParser varname v) === (Right v)))
 
-    describe "runParser [167] pn_chars" do
-      it "should runParser some valid input" do
+    describe "parse [167] pn_chars" do
+      it "should parse some valid input" do
         (runParser pn_chars "a") `shouldEqual` (Right "a")
         (runParser pn_chars "0") `shouldEqual` (Right "0")
         (runParser pn_chars "-") `shouldEqual` (Right "-")
@@ -229,3 +298,60 @@ main = run [consoleReporter] do
       
       it "should pass quickCheck" do
         liftEff' (quickCheck (\(ArbitraryPnChars c) -> (runParser pn_chars c) === (Right c)))
+
+    describe "parse [169] pn_local" do
+      it "should parse some valid input" do
+        (runParser pn_local "a") `shouldEqual` (Right "a")
+        (runParser pn_local "_") `shouldEqual` (Right "_")
+        (runParser pn_local "asdf") `shouldEqual` (Right "asdf")
+        (runParser pn_local "a:sdf") `shouldEqual` (Right "a:sdf")
+        (runParser pn_local "asdf\\%") `shouldEqual` (Right "asdf\\%")
+        (runParser pn_local "a.sdf") `shouldEqual` (Right "a.sdf")
+        (runParser pn_local "a..sdf") `shouldEqual` (Right "a..sdf")
+
+      it "should fail on invalid input" do
+        (isLeft (runParser pn_local "\t")) `shouldEqual` true 
+
+      it "should pass quickCheck" do 
+        liftEff' (quickCheck (\(ArbitraryPnLocal c) -> (runParser pn_local c) === (Right c)))
+
+    describe "parse [162] ws" do
+      it "should parse valid content" do
+        (runParser ws "\x0020") `shouldEqual` (Right "\x0020")
+        (runParser ws "\x0009") `shouldEqual` (Right "\x0009")
+        (runParser ws "\x000D") `shouldEqual` (Right "\x000D")
+        (runParser ws "\x000A") `shouldEqual` (Right "\x000A")
+
+      it "should fail on invalid input" do
+        (isLeft (runParser ws "a") `shouldEqual` true)
+
+    describe "parse [163] anon" do
+      it "should parse valid content" do
+        (runParser anon "[ ]") `shouldEqual` (Right "[ ]")
+        (runParser anon "[]") `shouldEqual` (Right "[]")
+      
+      it "should fail on invalid input" do
+        (isLeft (runParser anon "[ ") `shouldEqual` true) 
+
+    describe "parse [161] nil" do
+      it "should parse valid content" do
+        (runParser nil "( )") `shouldEqual` (Right "( )")
+        (runParser nil "()") `shouldEqual` (Right "()")
+      
+      it "should fail on invalid input" do
+        (isLeft (runParser nil "( ") `shouldEqual` true) 
+
+    describe "parse [168] echar" do
+      it "should parse valid content" do
+        (runParser echar "\\t") `shouldEqual` (Right "\\t")
+        (runParser echar "\\b") `shouldEqual` (Right "\\b")
+        (runParser echar "\\d") `shouldEqual` (Right "\\d")
+        (runParser echar "\\r") `shouldEqual` (Right "\\r")
+        (runParser echar "\\f") `shouldEqual` (Right "\\f")
+        (runParser echar "\\\"") `shouldEqual` (Right "\\\"")
+        (runParser echar "\\'") `shouldEqual` (Right "\\'")
+      
+      it "should fail on invalid input" do
+        (isLeft (runParser echar "t") `shouldEqual` true) 
+
+
