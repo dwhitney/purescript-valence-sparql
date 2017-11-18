@@ -1,17 +1,57 @@
 module Valence.SPARQL.Parser where
 
-import Prelude hiding (between)
-
 import Control.Alt ((<|>))
 import Data.Array (fold, many)
 import Data.String (singleton, toCharArray)
+import Prelude hiding (between)
 import Text.Parsing.StringParser (Parser, try)
-import Text.Parsing.StringParser.Combinators (option)
+import Text.Parsing.StringParser.Combinators (lookAhead, option, (<?>))
 import Text.Parsing.StringParser.String (anyDigit, oneOf, satisfy, string)
 
 -- | Lexer 
 
 type LexicalToken = Parser String
+
+-- | [156] STRING_LITERAL1 ::= "'" ( ([^#x27#x5C#xA#xD]) | ECHAR )* "'"
+string_literal1 :: LexicalToken
+string_literal1 = string_literal "'" allowedChar
+  where 
+    allowedChar = anyButThese <|> echar
+    anyButThese = singleton <$> (satisfy (\c -> c /= '\x0027' && c /= '\x0005C' && c /= '\x000D'))
+
+-- | [157] STRING_LITERAL2 ::= '"' ( ([^#x22#x5C#xA#xD]) | ECHAR )* '"'
+string_literal2 :: LexicalToken
+string_literal2 = string_literal "\"" allowedChar
+  where 
+    allowedChar = anyButThese <|> echar
+    anyButThese = singleton <$> (satisfy (\c -> c /= '\x0022' && c /= '\x0005C' && c /= '\x000D'))
+
+-- | [158] STRING_LITERAL_LONG1 ::= "'''" ( ( "'" | "''" )? ( [^'\] | ECHAR ) )* "'''"
+string_literal_long1 :: LexicalToken
+string_literal_long1 = string_literal "'''" content
+  where
+    content = (<>) <$> quotes <*> (singleton <$> satisfy (\c -> c /= '\'' && c /= '\\') <|> echar) 
+    quotes = try (option "" (doubleSingleQuote <|> singleSingleQuote))
+    singleSingleQuote = ((string "'") <* (lookAhead (singleton <$> satisfy (\c -> c /= '\''))))
+    doubleSingleQuote = (string "''") <* (lookAhead $ satisfy (\c -> c /= '\''))
+
+
+-- | [159] STRING_LITERAL_LONG2 ::= '"""' ( ( '"' | '""' )? ( [^"\] | ECHAR ) )* '"""'
+string_literal_long2 :: LexicalToken
+string_literal_long2 = string_literal "\"\"\"" content
+  where
+    content = (<>) <$> quotes <*> (singleton <$> satisfy (\c -> c /= '"' && c /= '\\') <|> echar) 
+    quotes = try (option "" (doubleSingleQuote <|> singleSingleQuote))
+    singleSingleQuote = ((string "\"") <* (lookAhead (singleton <$> satisfy (\c -> c /= '"'))))
+    doubleSingleQuote = (string "\"\"") <* (lookAhead $ satisfy (\c -> c /= '"')) 
+
+-- helper for the different string_literals
+string_literal :: String -> (Parser String) -> LexicalToken
+string_literal quoteType allowedChar = do
+  _   <- string quoteType 
+  cs  <- fold <$> (many allowedChar)
+  _   <- string quoteType 
+  pure (quoteType <> cs <> quoteType)
 
 -- | [160] ECHAR ::= '\' [tbnrf\"']
 echar :: LexicalToken

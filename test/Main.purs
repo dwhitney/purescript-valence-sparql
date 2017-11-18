@@ -4,10 +4,11 @@ import Prelude
 
 import Control.Monad.Aff (liftEff')
 import Control.Monad.Eff (Eff)
-import Control.Monad.Gen (chooseInt)
+import Control.Monad.Gen (chooseInt, suchThat)
 import Data.Char (fromCharCode, toCharCode)
+import Data.Char.Gen (genUnicodeChar)
 import Data.Either (Either(..), isLeft)
-import Data.List.Lazy (fold, replicateM)
+import Data.List.Lazy (elem, fold, foldMap, replicateM)
 import Data.NonEmpty ((:|))
 import Data.String (singleton)
 import Data.String.Gen (genDigitString)
@@ -19,7 +20,7 @@ import Test.Spec.QuickCheck (QCRunnerEffects)
 import Test.Spec.Reporter (consoleReporter)
 import Test.Spec.Runner (run)
 import Text.Parsing.StringParser (runParser)
-import Valence.SPARQL.Parser (anon, echar, hex, nil, percent, plx, pn_chars, pn_chars_base, pn_chars_u, pn_local, pn_local_esc, varname, ws)
+import Valence.SPARQL.Parser (anon, echar, hex, nil, percent, plx, pn_chars, pn_chars_base, pn_chars_u, pn_local, pn_local_esc, string_literal1, string_literal2, string_literal_long1, string_literal_long2, varname, ws)
 
 
 newtype ArbitraryPnLocalEsc = ArbitraryPnLocalEsc String 
@@ -193,6 +194,34 @@ instance aEChar :: Arbitrary AEChar where
     c <- elements ("t" :| ["b", "r", "f", "\"", "'"])
     pure $ AEChar ("\\" <> c)
 
+newtype AStringLiteral1 = AStringLiteral1 String
+instance aStringLiteral :: Arbitrary AStringLiteral1 where
+  arbitrary = do
+    i <- chooseInt 0 500
+    c <- replicateM i (genUnicodeChar `suchThat` (\c -> not (elem c ['\x0027', '\x0005C', '\x000D'] )))
+    pure (AStringLiteral1 ("'" <> (foldMap singleton c) <> "'"))
+
+newtype AStringLiteral2 = AStringLiteral2 String
+instance aStringLiteral2 :: Arbitrary AStringLiteral2 where
+  arbitrary = do
+    i <- chooseInt 0 500
+    c <- replicateM i (genUnicodeChar `suchThat` (\c -> not (elem c ['\x0022', '\x0005C', '\x000D'])))
+    pure (AStringLiteral2 ("\"" <> (foldMap singleton c) <> "\""))
+
+newtype AStringLiteralLong1 = AStringLiteralLong1 String
+instance aStringLiteralLong1 :: Arbitrary AStringLiteralLong1 where
+  arbitrary = do
+    i <- chooseInt 0 500
+    c <- replicateM i (genUnicodeChar `suchThat` (\c -> not (elem c ['\'', '\\'] )))
+    pure (AStringLiteralLong1 ("'''" <> (foldMap singleton c) <> "'''"))
+
+newtype AStringLiteralLong2 = AStringLiteralLong2 String
+instance aStringLiteralLong2 :: Arbitrary AStringLiteralLong2 where
+  arbitrary = do
+    i <- chooseInt 0 500
+    c <- replicateM i (genUnicodeChar `suchThat` (\c -> not (elem c ['"', '\\'] )))
+    pure (AStringLiteralLong2 ("\"\"\"" <> (foldMap singleton c) <> "\"\"\""))
+
 
 main :: Eff (QCRunnerEffects () ) Unit  
 main = run [consoleReporter] do 
@@ -253,6 +282,7 @@ main = run [consoleReporter] do
 
       it "should pass quickCheck" do
         liftEff' (quickCheck (\(ArbitraryPlx p) -> (runParser plx p)  === (Right p))) 
+
     describe "parse [164] pn_char_base" do
       it "should parse some base character" do
         (runParser pn_chars_base "a") `shouldEqual` (Right "a")
@@ -354,4 +384,47 @@ main = run [consoleReporter] do
       it "should fail on invalid input" do
         (isLeft (runParser echar "t") `shouldEqual` true) 
 
+    describe "parse [156] string_literal1" do
+      it "should pass quickCheck" do
+        liftEff' (quickCheck (\(AStringLiteral1 s) -> (runParser string_literal1 s) === (Right s)))
+
+    describe "parse [157] string_literal2" do
+      it "should pass quickCheck" do
+        liftEff' (quickCheck (\(AStringLiteral2 s) -> (runParser string_literal2 s) === (Right s)))
+
+    describe "parse [158] string_literal_long1" do
+      it "should parse valid input" do 
+        (runParser string_literal_long1 "'''a'''") `shouldEqual` (Right "'''a'''")
+      it "should handle an empty string" do
+        (runParser string_literal_long1 "''''''") `shouldEqual` (Right "''''''")
+      it "should handle a single quotes followed by another character" do
+        (runParser string_literal_long1 "''''a'''") `shouldEqual` (Right "''''a'''")
+      it "should handle a two single quotes followed by another character" do
+        (runParser string_literal_long1 "'''''a'''") `shouldEqual` (Right "'''''a'''")
+      it "should handle a single quotes followed by an echar" do
+        (runParser string_literal_long1 "''''\\t'''") `shouldEqual` (Right "''''\\t'''")
+      it "should handle a two single quotes followed by an echar" do
+        (runParser string_literal_long1 "'''''\\t'''") `shouldEqual` (Right "'''''\\t'''")
+      it "should pass quickCheck" do
+        liftEff' (quickCheck (\(AStringLiteralLong1 s) -> (runParser string_literal_long1 s) === (Right s)))
+
+    describe "parse [159] string_literal_long2" do
+      it "should parse valid input" do 
+        (runParser string_literal_long2 "\"\"\"a\"\"\"") `shouldEqual` (Right "\"\"\"a\"\"\"")
+      it "should handle an empty string" do
+        (runParser string_literal_long2 "\"\"\"\"\"\"") `shouldEqual` (Right "\"\"\"\"\"\"")
+      it "should handle a single quotes followed by another character" do
+        (runParser string_literal_long2 "\"\"\"\"a\"\"\"") `shouldEqual` (Right "\"\"\"\"a\"\"\"")
+      it "should handle a two single quotes followed by another character" do
+        (runParser string_literal_long2 "\"\"\"\"\"a\"\"\"") `shouldEqual` (Right "\"\"\"\"\"a\"\"\"")
+      it "should handle a single quotes followed by an echar" do
+        (runParser string_literal_long2 "\"\"\"\"\\t\"\"\"") `shouldEqual` (Right "\"\"\"\"\\t\"\"\"")
+      it "should handle a two single quotes followed by an echar" do
+        (runParser string_literal_long2 "\"\"\"\"\"\\t\"\"\"") `shouldEqual` (Right "\"\"\"\"\"\\t\"\"\"")
+      it "should pass quickCheck" do
+        liftEff' (quickCheck (\(AStringLiteralLong2 s) -> (runParser string_literal_long2 s) === (Right s)))
+
+
+      it "should pass quickCheck" do
+        liftEff' (quickCheck (\(AStringLiteralLong2 s) -> (runParser string_literal_long2 s) === (Right s)))
 
