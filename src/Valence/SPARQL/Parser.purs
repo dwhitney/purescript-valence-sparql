@@ -5,12 +5,47 @@ import Data.Array (fold, many)
 import Data.String (singleton, toCharArray)
 import Prelude hiding (between)
 import Text.Parsing.StringParser (Parser, try)
-import Text.Parsing.StringParser.Combinators (lookAhead, option, (<?>))
+import Text.Parsing.StringParser.Combinators (lookAhead, many1, option)
 import Text.Parsing.StringParser.String (anyDigit, oneOf, satisfy, string)
 
 -- | Lexer 
 
 type LexicalToken = Parser String
+
+-- | [146] INTEGER ::= [0-9]+
+integer :: LexicalToken
+integer = fold <$> (many1 $ singleton <$> anyDigit)
+
+-- | [147] DECIMAL ::= [0-9]* '.' [0-9]+
+decimal :: LexicalToken
+decimal = do
+  i <- fold <$> (many $ singleton <$> anyDigit)
+  _ <- string "."
+  d <- fold <$> (many1 $ singleton <$> anyDigit)
+  pure (i <> "." <> d)
+
+
+-- | [148] DOUBLE ::= [0-9]+ '.' [0-9]* EXPONENT | '.' ([0-9])+ EXPONENT | ([0-9])+ EXPONENT
+
+-- | [149] INTEGER_POSITIVE ::= '+' INTEGER
+
+-- | [150] DECIMAL_POSITIVE ::= '+' DECIMAL
+
+-- | [151] DOUBLE_POSITIVE ::= '+' DOUBLE
+
+-- | [152] INTEGER_NEGATIVE ::= '-' INTEGER
+
+-- | [153] DECIMAL_NEGATIVE ::= '-' DECIMAL
+
+-- | [154] DOUBLE_NEGATIVE ::= '-' DOUBLE
+
+-- | [155] EXPONENT ::= [eE] [+-]? [0-9]+
+exponent :: LexicalToken
+exponent = do
+  e     <- singleton <$> oneOf ['e', 'E']
+  sign  <- (option "" (singleton <$> oneOf ['-', '+']))
+  nums  <- fold <$> (many1 $ singleton <$> anyDigit)
+  pure (e <> sign <> nums)
 
 -- | [156] STRING_LITERAL1 ::= "'" ( ([^#x27#x5C#xA#xD]) | ECHAR )* "'"
 string_literal1 :: LexicalToken

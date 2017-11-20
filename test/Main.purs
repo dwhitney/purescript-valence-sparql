@@ -20,7 +20,7 @@ import Test.Spec.QuickCheck (QCRunnerEffects)
 import Test.Spec.Reporter (consoleReporter)
 import Test.Spec.Runner (run)
 import Text.Parsing.StringParser (runParser)
-import Valence.SPARQL.Parser (anon, echar, hex, nil, percent, plx, pn_chars, pn_chars_base, pn_chars_u, pn_local, pn_local_esc, string_literal1, string_literal2, string_literal_long1, string_literal_long2, varname, ws)
+import Valence.SPARQL.Parser (anon, echar, exponent, hex, integer, nil, percent, plx, pn_chars, pn_chars_base, pn_chars_u, pn_local, pn_local_esc, string_literal1, string_literal2, string_literal_long1, string_literal_long2, varname, ws)
 
 
 newtype ArbitraryPnLocalEsc = ArbitraryPnLocalEsc String 
@@ -197,30 +197,44 @@ instance aEChar :: Arbitrary AEChar where
 newtype AStringLiteral1 = AStringLiteral1 String
 instance aStringLiteral :: Arbitrary AStringLiteral1 where
   arbitrary = do
-    i <- chooseInt 0 500
+    i <- chooseInt 0 50
     c <- replicateM i (genUnicodeChar `suchThat` (\c -> not (elem c ['\x0027', '\x0005C', '\x000D'] )))
     pure (AStringLiteral1 ("'" <> (foldMap singleton c) <> "'"))
 
 newtype AStringLiteral2 = AStringLiteral2 String
 instance aStringLiteral2 :: Arbitrary AStringLiteral2 where
   arbitrary = do
-    i <- chooseInt 0 500
+    i <- chooseInt 0 50
     c <- replicateM i (genUnicodeChar `suchThat` (\c -> not (elem c ['\x0022', '\x0005C', '\x000D'])))
     pure (AStringLiteral2 ("\"" <> (foldMap singleton c) <> "\""))
 
 newtype AStringLiteralLong1 = AStringLiteralLong1 String
 instance aStringLiteralLong1 :: Arbitrary AStringLiteralLong1 where
   arbitrary = do
-    i <- chooseInt 0 500
+    i <- chooseInt 0 50
     c <- replicateM i (genUnicodeChar `suchThat` (\c -> not (elem c ['\'', '\\'] )))
     pure (AStringLiteralLong1 ("'''" <> (foldMap singleton c) <> "'''"))
 
 newtype AStringLiteralLong2 = AStringLiteralLong2 String
 instance aStringLiteralLong2 :: Arbitrary AStringLiteralLong2 where
   arbitrary = do
-    i <- chooseInt 0 500
+    i <- chooseInt 0 50
     c <- replicateM i (genUnicodeChar `suchThat` (\c -> not (elem c ['"', '\\'] )))
     pure (AStringLiteralLong2 ("\"\"\"" <> (foldMap singleton c) <> "\"\"\""))
+
+newtype AExponent = AExponent String
+
+instance aExponent :: Arbitrary AExponent where
+  arbitrary = do
+    e <- elements ("e" :| ["E"])
+    s <- elements ("-" :| ["+", ""])
+    n <- genDigitString
+    pure $ AExponent (e <> s <> n)
+
+newtype AInteger = AInteger String
+
+instance aInteger :: Arbitrary AInteger where
+  arbitrary = AInteger <$> genDigitString
 
 
 main :: Eff (QCRunnerEffects () ) Unit  
@@ -424,7 +438,21 @@ main = run [consoleReporter] do
       it "should pass quickCheck" do
         liftEff' (quickCheck (\(AStringLiteralLong2 s) -> (runParser string_literal_long2 s) === (Right s)))
 
-
+    describe "parse [155] exponent" do
+      it "should parse basic valid input" do
+        (runParser exponent "e+100") `shouldEqual` (Right "e+100")
+        (runParser exponent "E-100") `shouldEqual` (Right "E-100")
+        (runParser exponent "e100") `shouldEqual` (Right "e100")
+      it "should fail on some invalid input" do
+        (isLeft (runParser exponent "-100")) `shouldEqual` true
+        (isLeft (runParser exponent "e-")) `shouldEqual` true
       it "should pass quickCheck" do
-        liftEff' (quickCheck (\(AStringLiteralLong2 s) -> (runParser string_literal_long2 s) === (Right s)))
+        liftEff' (quickCheck (\(AExponent e) -> (runParser exponent e) === (Right e)))
 
+    describe "parse [146] integer" do
+      it "should parse some basic input" do
+        (runParser integer "123456") `shouldEqual` (Right "123456")
+      it "should fail on invalid input" do
+        (isLeft (runParser integer "asdf")) `shouldEqual` true
+      it "should pass quickCheck" do
+        liftEff' (quickCheck (\(AInteger i) -> (runParser integer i)  === (Right i)))
