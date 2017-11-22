@@ -6,11 +6,11 @@ import Control.Monad.Aff (liftEff')
 import Control.Monad.Eff (Eff)
 import Control.Monad.Gen (chooseInt, suchThat)
 import Data.Char (fromCharCode, toCharCode)
-import Data.Char.Gen (genUnicodeChar)
+import Data.Char.Gen (genAlpha, genDigitChar, genUnicodeChar)
 import Data.Either (Either(..), isLeft)
 import Data.List.Lazy (elem, fold, foldMap, replicateM)
 import Data.NonEmpty ((:|))
-import Data.String (singleton)
+import Data.String (singleton, toCharArray)
 import Data.String.Gen (genDigitString)
 import Test.QuickCheck (class Arbitrary, arbitrary, quickCheck, (===))
 import Test.QuickCheck.Gen (Gen, elements)
@@ -20,7 +20,7 @@ import Test.Spec.QuickCheck (QCRunnerEffects)
 import Test.Spec.Reporter (consoleReporter)
 import Test.Spec.Runner (run)
 import Text.Parsing.StringParser (runParser)
-import Valence.SPARQL.Parser (anon, echar, exponent, hex, integer, nil, percent, plx, pn_chars, pn_chars_base, pn_chars_u, pn_local, pn_local_esc, string_literal1, string_literal2, string_literal_long1, string_literal_long2, varname, ws)
+import Valence.SPARQL.Parser (anon, blank_node_label, decimal, decimal_negative, decimal_positive, double, double_negative, double_positive, echar, exponent, hex, integer, integer_negative, integer_positive, langtag, nil, percent, plx, pn_chars, pn_chars_base, pn_chars_u, pn_local, pn_local_esc, string_literal1, string_literal2, string_literal_long1, string_literal_long2, varname, var1, var2, ws)
 
 
 newtype ArbitraryPnLocalEsc = ArbitraryPnLocalEsc String 
@@ -235,6 +235,114 @@ newtype AInteger = AInteger String
 
 instance aInteger :: Arbitrary AInteger where
   arbitrary = AInteger <$> genDigitString
+
+
+newtype ADecimal = ADecimal String
+
+instance aDecimal :: Arbitrary ADecimal where
+  arbitrary = do
+    i           <- chooseInt 0 5
+    firstPart   <- replicateM i genDigitChar
+    n           <- chooseInt 1 5
+    secondPart  <- replicateM n genDigitChar
+    pure (ADecimal ((foldMap singleton firstPart) <> "." <> (foldMap singleton secondPart)))
+
+newtype ADouble = ADouble String
+
+instance aDouble :: Arbitrary ADouble where
+  arbitrary = do
+    n     <- chooseInt 0 2
+    case n of 
+      0 -> do 
+        i <- arbitrary <#> (\(AInteger int) -> int)
+        p <- arbitrary >>= (\b -> if b then (pure "") else (arbitrary <#> (\(AInteger int) -> int)))
+        e <- arbitrary <#> (\(AExponent e) -> e)
+        pure (ADouble (i <> p <> e))
+      1 -> do 
+        i <- arbitrary <#> (\(AInteger int) -> int)
+        e <- arbitrary <#> (\(AExponent e) -> e)
+        pure (ADouble ("." <> i <> e))
+      _ -> do 
+        i <- arbitrary <#> (\(AInteger int) -> int)
+        e <- arbitrary <#> (\(AExponent e) -> e)
+        pure (ADouble (i <> e))
+
+newtype AIntegerPositive = AIntegerPositive String
+
+instance aAIntegerPositive :: Arbitrary AIntegerPositive where
+  arbitrary = arbitrary <#> (\(AInteger n) -> AIntegerPositive ("+" <> n))
+
+newtype ADecimalPositive = ADecimalPositive String
+
+instance aADecimalPositive :: Arbitrary ADecimalPositive where
+  arbitrary = arbitrary <#> (\(ADecimal n) -> ADecimalPositive ("+" <> n))
+
+newtype ADoublePositive = ADoublePositive String
+
+instance aADoublePositive :: Arbitrary ADoublePositive where
+  arbitrary = arbitrary <#> (\(ADouble n) -> ADoublePositive ("+" <> n))
+
+newtype AIntegerNegative = AIntegerNegative String
+
+instance aAIntegerNegative :: Arbitrary AIntegerNegative where
+  arbitrary = arbitrary <#> (\(AInteger n) -> AIntegerNegative ("-" <> n))
+
+newtype ADecimalNegative = ADecimalNegative String
+
+instance aADecimalNegative :: Arbitrary ADecimalNegative where
+  arbitrary = arbitrary <#> (\(ADecimal n) -> ADecimalNegative ("-" <> n))
+
+newtype ADoubleNegative = ADoubleNegative String
+
+instance aADoubleNegative :: Arbitrary ADoubleNegative where
+  arbitrary = arbitrary <#> (\(ADouble n) -> ADoubleNegative ("-" <> n))
+
+newtype ALangtag = ALangtag String
+
+instance aLangtag :: Arbitrary ALangtag where
+  arbitrary = do
+    lCount        <- chooseInt 1 5
+    letters       <- replicateM lCount genAlpha
+    ldCount       <- chooseInt 0 5
+    letterDashes  <- replicateM ldCount (elements ('a' :| (toCharArray "bcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")))
+    case ldCount of 
+      0 -> pure (ALangtag ("@" <> (foldMap singleton letters) <> (foldMap singleton letterDashes)))
+      _ -> pure (ALangtag ("@" <> (foldMap singleton letters) <> "-" <> (foldMap singleton letterDashes)))
+
+
+newtype AVar2 = AVar2 String
+
+instance aVar2 :: Arbitrary AVar2 where
+  arbitrary = do
+    v <- arbitrary <#> (\(ArbitraryVarname v) -> v)
+    pure (AVar2 ("$" <> v))
+
+newtype AVar1 = AVar1 String
+
+instance aVar1 :: Arbitrary AVar1 where
+  arbitrary = do
+    v <- arbitrary <#> (\(ArbitraryVarname v) -> v)
+    pure (AVar1 ("?" <> v))
+
+newtype ABlankNode = ABlankNode String
+
+instance aBlankNode :: Arbitrary ABlankNode where
+  arbitrary = do
+    firstPart   <-  arbitrary >>= (\b ->
+                      if b 
+                      then (arbitrary <#> (\(ArbitraryPnCharsU c) -> c))
+                      else singleton <$> genDigitChar)
+    secondPart  <-  do
+                      i       <- chooseInt 0 5
+                      cs      <- replicateM i (arbitrary >>= (\b ->
+                                  if b 
+                                  then (arbitrary <#> (\(ArbitraryPnChars c) -> c))
+                                  else pure "."))
+                      finalC  <- case i of 
+                                    0 -> pure ""
+                                    _ -> (arbitrary <#> (\(ArbitraryPnChars c) -> c))   
+                      pure ((fold cs) <> finalC)
+    pure (ABlankNode ("_:" <> firstPart <> secondPart))
 
 
 main :: Eff (QCRunnerEffects () ) Unit  
@@ -456,3 +564,101 @@ main = run [consoleReporter] do
         (isLeft (runParser integer "asdf")) `shouldEqual` true
       it "should pass quickCheck" do
         liftEff' (quickCheck (\(AInteger i) -> (runParser integer i)  === (Right i)))
+
+    describe "parse [147] decimal" do
+      it "should parse some basic input" do
+        (runParser decimal "123.456") `shouldEqual` (Right "123.456")
+        (runParser decimal ".456") `shouldEqual` (Right ".456")
+      it "should fail on invalid input" do
+        (isLeft (runParser decimal "asdf")) `shouldEqual` true
+      it "should pass quickCheck" do
+        liftEff' (quickCheck (\(ADecimal d) -> (runParser decimal d)  === (Right d)))
+
+    describe "parse [148] double" do
+      it "should parse some basic input" do
+        (runParser double "123.456e1") `shouldEqual` (Right "123.456e1")
+        (runParser double ".456e10") `shouldEqual` (Right ".456e10")
+        (runParser double "456E100") `shouldEqual` (Right "456E100")
+      it "should fail on invalid input" do
+        (isLeft (runParser double "asdf")) `shouldEqual` true
+      it "should pass quickCheck" do
+        liftEff' (quickCheck (\(ADouble d) -> (runParser double d)  === (Right d)))
+
+    describe "parse [146] integer_positive" do
+      it "should parse some basic input" do
+        (runParser integer_positive "+123456") `shouldEqual` (Right "+123456")
+      it "should fail on invalid input" do
+        (isLeft (runParser integer_positive "asdf")) `shouldEqual` true
+      it "should pass quickCheck" do
+        liftEff' (quickCheck (\(AIntegerPositive i) -> (runParser integer_positive i)  === (Right i)))
+
+    describe "parse [150] decimal_positive" do
+      it "should parse some basic input" do
+        (runParser decimal_positive "+123.456") `shouldEqual` (Right "+123.456")
+        (runParser decimal_positive "+.456") `shouldEqual` (Right "+.456")
+      it "should fail on invalid input" do
+        (isLeft (runParser decimal_positive "asdf")) `shouldEqual` true
+      it "should pass quickCheck" do
+        liftEff' (quickCheck (\(ADecimalPositive d) -> (runParser decimal_positive d)  === (Right d)))
+
+    describe "parse [151] double_positive" do
+      it "should parse some basic input" do
+        (runParser double_positive "+123.456e1") `shouldEqual` (Right "+123.456e1")
+        (runParser double_positive "+.456e10") `shouldEqual` (Right "+.456e10")
+        (runParser double_positive "+456E100") `shouldEqual` (Right "+456E100")
+      it "should fail on invalid input" do
+        (isLeft (runParser double_positive "asdf")) `shouldEqual` true
+      it "should pass quickCheck" do
+        liftEff' (quickCheck (\(ADoublePositive d) -> (runParser double_positive d)  === (Right d)))
+
+    describe "parse [152] integer_negative" do
+      it "should parse some basic input" do
+        (runParser integer_negative "-123456") `shouldEqual` (Right "-123456")
+      it "should fail on invalid input" do
+        (isLeft (runParser integer_negative "asdf")) `shouldEqual` true
+      it "should pass quickCheck" do
+        liftEff' (quickCheck (\(AIntegerNegative i) -> (runParser integer_negative i)  === (Right i)))
+
+    describe "parse [153] decimal_negative" do
+      it "should parse some basic input" do
+        (runParser decimal_negative "-123.456") `shouldEqual` (Right "-123.456")
+        (runParser decimal_negative "-.456") `shouldEqual` (Right "-.456")
+      it "should fail on invalid input" do
+        (isLeft (runParser decimal_negative "asdf")) `shouldEqual` true
+      it "should pass quickCheck" do
+        liftEff' (quickCheck (\(ADecimalNegative d) -> (runParser decimal_negative d)  === (Right d)))
+
+    describe "parse [154] double_negative" do
+      it "should parse some basic input" do
+        (runParser double_negative "-123.456e1") `shouldEqual` (Right "-123.456e1")
+        (runParser double_negative "-.456e10") `shouldEqual` (Right "-.456e10")
+        (runParser double_negative "-456E100") `shouldEqual` (Right "-456E100")
+      it "should fail on invalid input" do
+        (isLeft (runParser double_negative "asdf")) `shouldEqual` true
+      it "should pass quickCheck" do
+        liftEff' (quickCheck (\(ADoubleNegative d) -> (runParser double_negative d)  === (Right d)))
+
+    describe "parse [145] langtag" do
+      it "should parse some basic input" do
+        (runParser langtag "@eng") `shouldEqual` (Right "@eng")
+        (runParser langtag "@eng-123asdf") `shouldEqual` (Right "@eng-123asdf")
+      it "should fail on bad data" do 
+        (isLeft (runParser langtag "eng")) `shouldEqual` true
+      it "should pass quickCheck" do 
+        liftEff' (quickCheck (\(ALangtag t) -> (runParser langtag t)  === (Right t)))
+
+    describe "parse [144] var2" do
+      it "parse basic input" do
+        liftEff' (quickCheck (\(AVar2 v) -> (runParser var2 v) === (Right v)))
+
+    describe "parse [143] var1" do
+      it "parse basic input" do
+        liftEff' (quickCheck (\(AVar1 v) -> (runParser var1 v) === (Right v)))
+
+    describe "parse [142] blank_node_label" do
+      it "should parse some basic input" do
+        (runParser blank_node_label "_:a") `shouldEqual` (Right "_:a")
+        --(runParser blank_node_label "_:asdf") `shouldEqual` (Right "_:asdf")
+
+
+    

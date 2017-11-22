@@ -1,16 +1,46 @@
 module Valence.SPARQL.Parser where
 
+import Prelude hiding (between)
+
 import Control.Alt ((<|>))
 import Data.Array (fold, many)
 import Data.String (singleton, toCharArray)
-import Prelude hiding (between)
 import Text.Parsing.StringParser (Parser, try)
 import Text.Parsing.StringParser.Combinators (lookAhead, many1, option)
-import Text.Parsing.StringParser.String (anyDigit, oneOf, satisfy, string)
+import Text.Parsing.StringParser.String (alphaNum, anyDigit, anyLetter, oneOf, satisfy, string)
 
 -- | Lexer 
 
 type LexicalToken = Parser String
+
+-- | [139]  	IRIREF	  ::=  	'<' ([^<>"{}|^`\]-[#x00-#x20])* '>'
+-- | [140]  	PNAME_NS	  ::=  	PN_PREFIX? ':'
+-- | [141]  	PNAME_LN	  ::=  	PNAME_NS PN_LOCAL
+
+-- | [142]  	BLANK_NODE_LABEL	  ::=  	'_:' ( PN_CHARS_U | [0-9] ) ((PN_CHARS|'.')* PN_CHARS)?
+blank_node_label :: LexicalToken
+blank_node_label = 
+  (string "_:" <> (pn_chars_u <|> (singleton <$> anyDigit))) <>
+  (try (option "" ((fold <$> (many (pn_chars <|> (string ".")) )) <* (lookAhead pn_chars))))
+  --(pn_chars_u <|> (singleton <$> anyDigit)) <>
+  --(try (option "" ((fold <$> (many (pn_chars <|> string ".")))) <> pn_chars))
+
+
+-- | [143]  	VAR1	  ::=  	'?' VARNAME
+var1 :: LexicalToken
+var1 = string "?" <> varname
+
+-- | [144]  	VAR2	  ::=  	'$' VARNAME
+var2 :: LexicalToken
+var2 = string "$" <> varname
+
+-- | [145]  	LANGTAG	  ::=  '@' [a-zA-Z]+ ('-' [a-zA-Z0-9]+)*	
+langtag :: LexicalToken
+langtag = at <> letters <> dashAlphaNums
+  where 
+    at = string "@"
+    letters = fold <$> (many1 $ singleton <$> anyLetter) 
+    dashAlphaNums = fold <$> (many ((string "-") <> (fold <$> (many1 (singleton <$> alphaNum)))))
 
 -- | [146] INTEGER ::= [0-9]+
 integer :: LexicalToken
@@ -18,34 +48,53 @@ integer = fold <$> (many1 $ singleton <$> anyDigit)
 
 -- | [147] DECIMAL ::= [0-9]* '.' [0-9]+
 decimal :: LexicalToken
-decimal = do
-  i <- fold <$> (many $ singleton <$> anyDigit)
-  _ <- string "."
-  d <- fold <$> (many1 $ singleton <$> anyDigit)
-  pure (i <> "." <> d)
+decimal = possiblyDigits <> dot <> integer 
 
+possiblyDigits :: Parser String
+possiblyDigits = fold <$> (many $ singleton <$> anyDigit)
+
+dot :: Parser String
+dot = string "."
 
 -- | [148] DOUBLE ::= [0-9]+ '.' [0-9]* EXPONENT | '.' ([0-9])+ EXPONENT | ([0-9])+ EXPONENT
+double :: LexicalToken
+double = try one <|> try two <|> try three 
+  where
+    one = integer <> dot <> possiblyDigits <> exponent
+    two = dot <> integer <> exponent 
+    three = integer <> exponent 
 
 -- | [149] INTEGER_POSITIVE ::= '+' INTEGER
+integer_positive :: LexicalToken
+integer_positive = (string "+") <> integer
 
 -- | [150] DECIMAL_POSITIVE ::= '+' DECIMAL
+decimal_positive :: LexicalToken
+decimal_positive = (string "+") <> decimal 
 
 -- | [151] DOUBLE_POSITIVE ::= '+' DOUBLE
+double_positive :: LexicalToken
+double_positive = (string "+") <> double 
 
 -- | [152] INTEGER_NEGATIVE ::= '-' INTEGER
+integer_negative :: LexicalToken
+integer_negative = (string "-") <> integer
 
 -- | [153] DECIMAL_NEGATIVE ::= '-' DECIMAL
+decimal_negative :: LexicalToken
+decimal_negative = (string "-") <> decimal
 
 -- | [154] DOUBLE_NEGATIVE ::= '-' DOUBLE
+double_negative :: LexicalToken
+double_negative = (string "-") <> double 
 
 -- | [155] EXPONENT ::= [eE] [+-]? [0-9]+
 exponent :: LexicalToken
-exponent = do
-  e     <- singleton <$> oneOf ['e', 'E']
-  sign  <- (option "" (singleton <$> oneOf ['-', '+']))
-  nums  <- fold <$> (many1 $ singleton <$> anyDigit)
-  pure (e <> sign <> nums)
+exponent = e <> sign <> nums 
+  where
+    e     = singleton <$> oneOf ['e', 'E']
+    sign  = (option "" (singleton <$> oneOf ['-', '+']))
+    nums  = fold <$> (many1 $ singleton <$> anyDigit)
 
 -- | [156] STRING_LITERAL1 ::= "'" ( ([^#x27#x5C#xA#xD]) | ECHAR )* "'"
 string_literal1 :: LexicalToken
@@ -65,7 +114,7 @@ string_literal2 = string_literal "\"" allowedChar
 string_literal_long1 :: LexicalToken
 string_literal_long1 = string_literal "'''" content
   where
-    content = (<>) <$> quotes <*> (singleton <$> satisfy (\c -> c /= '\'' && c /= '\\') <|> echar) 
+    content = quotes <> (singleton <$> satisfy (\c -> c /= '\'' && c /= '\\') <|> echar) 
     quotes = try (option "" (doubleSingleQuote <|> singleSingleQuote))
     singleSingleQuote = ((string "'") <* (lookAhead (singleton <$> satisfy (\c -> c /= '\''))))
     doubleSingleQuote = (string "''") <* (lookAhead $ satisfy (\c -> c /= '\''))
@@ -75,7 +124,7 @@ string_literal_long1 = string_literal "'''" content
 string_literal_long2 :: LexicalToken
 string_literal_long2 = string_literal "\"\"\"" content
   where
-    content = (<>) <$> quotes <*> (singleton <$> satisfy (\c -> c /= '"' && c /= '\\') <|> echar) 
+    content = quotes <> (singleton <$> satisfy (\c -> c /= '"' && c /= '\\') <|> echar) 
     quotes = try (option "" (doubleSingleQuote <|> singleSingleQuote))
     singleSingleQuote = ((string "\"") <* (lookAhead (singleton <$> satisfy (\c -> c /= '"'))))
     doubleSingleQuote = (string "\"\"") <* (lookAhead $ satisfy (\c -> c /= '"')) 
@@ -90,10 +139,7 @@ string_literal quoteType allowedChar = do
 
 -- | [160] ECHAR ::= '\' [tbnrf\"']
 echar :: LexicalToken
-echar = do
-  _ <- string "\\"
-  c <- oneOf $ toCharArray "tbdrf\"'" 
-  pure ("\\" <> (singleton c))
+echar = (string "\\") <> (singleton <$> (oneOf $ toCharArray "tbdrf\"'"))
 
 -- | [161] NIL ::= '(' WS* ')'
 nil :: LexicalToken
