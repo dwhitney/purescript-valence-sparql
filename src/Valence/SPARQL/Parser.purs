@@ -3,7 +3,7 @@ module Valence.SPARQL.Parser where
 import Prelude hiding (between)
 
 import Control.Alt ((<|>))
-import Data.Array (fold, many)
+import Data.Array (elem, fold, many)
 import Data.String (singleton, toCharArray)
 import Text.Parsing.StringParser (Parser, try)
 import Text.Parsing.StringParser.Combinators (lookAhead, many1, option)
@@ -14,16 +14,31 @@ import Text.Parsing.StringParser.String (alphaNum, anyDigit, anyLetter, oneOf, s
 type LexicalToken = Parser String
 
 -- | [139]  	IRIREF	  ::=  	'<' ([^<>"{}|^`\]-[#x00-#x20])* '>'
+iriref :: LexicalToken
+iriref = lAngleBracket <> middlePart <> rAngleBracket
+  where
+    lAngleBracket = string "<"
+    rAngleBracket = string ">"
+    middlePart = fold <$> (many $ singleton <$> satisfy (\c -> 
+                    (c > '\x0020') &&
+                    (not elem c ['<', '>','"', '{', '}', '|', '^', '`', '\\']) 
+                  ))
+
 -- | [140]  	PNAME_NS	  ::=  	PN_PREFIX? ':'
+pname_ns :: LexicalToken
+pname_ns = optional_pn_prefix <> (string ":") 
+  where
+    optional_pn_prefix = option "" pn_prefix
+
 -- | [141]  	PNAME_LN	  ::=  	PNAME_NS PN_LOCAL
+pname_ln :: LexicalToken
+pname_ln = pname_ns <> pn_local
 
 -- | [142]  	BLANK_NODE_LABEL	  ::=  	'_:' ( PN_CHARS_U | [0-9] ) ((PN_CHARS|'.')* PN_CHARS)?
 blank_node_label :: LexicalToken
 blank_node_label = 
   (string "_:" <> (pn_chars_u <|> (singleton <$> anyDigit))) <>
-  (try (option "" ((fold <$> (many (pn_chars <|> (string ".")) )) <* (lookAhead pn_chars))))
-  --(pn_chars_u <|> (singleton <$> anyDigit)) <>
-  --(try (option "" ((fold <$> (many (pn_chars <|> string ".")))) <> pn_chars))
+  (option "" ((fold <$> (many (pn_chars <|> ((string ".") <* (lookAhead pn_chars)) )))))
 
 
 -- | [143]  	VAR1	  ::=  	'?' VARNAME
@@ -212,9 +227,9 @@ pn_chars =
 
 -- | [168] PN_PREFIX ::= PN_CHARS_BASE ((PN_CHARS|'.')* PN_CHARS)?
 pn_prefix :: LexicalToken
-pn_prefix = (<>) <$> pn_chars_base <*> (option "" moreChars)
+pn_prefix = pn_chars_base <> (option "" moreChars)
   where 
-    moreChars = (<>) <$> (fold <$> (many (pn_chars <|> string "."))) <*> pn_chars
+    moreChars = (fold <$> (many (pn_chars <|> ((string ".") <* (lookAhead pn_chars)))))
 
 
 -- | [169] PN_LOCAL ::= (PN_CHARS_U | ':' | [0-9] | PLX ) ((PN_CHARS | '.' | ':' | PLX)* (PN_CHARS | ':' | PLX) )?

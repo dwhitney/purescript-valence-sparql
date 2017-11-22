@@ -20,7 +20,7 @@ import Test.Spec.QuickCheck (QCRunnerEffects)
 import Test.Spec.Reporter (consoleReporter)
 import Test.Spec.Runner (run)
 import Text.Parsing.StringParser (runParser)
-import Valence.SPARQL.Parser (anon, blank_node_label, decimal, decimal_negative, decimal_positive, double, double_negative, double_positive, echar, exponent, hex, integer, integer_negative, integer_positive, langtag, nil, percent, plx, pn_chars, pn_chars_base, pn_chars_u, pn_local, pn_local_esc, string_literal1, string_literal2, string_literal_long1, string_literal_long2, varname, var1, var2, ws)
+import Valence.SPARQL.Parser (anon, blank_node_label, decimal, decimal_negative, decimal_positive, double, double_negative, double_positive, echar, exponent, hex, integer, integer_negative, integer_positive, iriref, langtag, nil, percent, plx, pn_chars, pn_chars_base, pn_chars_u, pn_local, pn_local_esc, pn_prefix, pname_ln, pname_ns, string_literal1, string_literal2, string_literal_long1, string_literal_long2, var1, var2, varname, ws)
 
 
 newtype ArbitraryPnLocalEsc = ArbitraryPnLocalEsc String 
@@ -130,7 +130,7 @@ instance arbitraryPnPrefix :: Arbitrary ArbitraryPnPrefix where
     i <- chooseInt 0 10
     cs <- replicateM i (arbitrary >>= 
             if _ 
-            then pure "." 
+            then arbitrary <#> (\(ArbitraryPnChars c) -> "." <> c) 
             else arbitrary <#> (\(ArbitraryPnChars c) -> c)) 
     case i of 
       0 -> pure b
@@ -324,26 +324,51 @@ instance aVar1 :: Arbitrary AVar1 where
     v <- arbitrary <#> (\(ArbitraryVarname v) -> v)
     pure (AVar1 ("?" <> v))
 
-newtype ABlankNode = ABlankNode String
+newtype ABlankNodeLabel = ABlankNodeLabel String
 
-instance aBlankNode :: Arbitrary ABlankNode where
+instance aBlankNodeLabel :: Arbitrary ABlankNodeLabel where
   arbitrary = do
     firstPart   <-  arbitrary >>= (\b ->
                       if b 
                       then (arbitrary <#> (\(ArbitraryPnCharsU c) -> c))
                       else singleton <$> genDigitChar)
     secondPart  <-  do
-                      i       <- chooseInt 0 5
-                      cs      <- replicateM i (arbitrary >>= (\b ->
-                                  if b 
-                                  then (arbitrary <#> (\(ArbitraryPnChars c) -> c))
-                                  else pure "."))
-                      finalC  <- case i of 
-                                    0 -> pure ""
-                                    _ -> (arbitrary <#> (\(ArbitraryPnChars c) -> c))   
-                      pure ((fold cs) <> finalC)
-    pure (ABlankNode ("_:" <> firstPart <> secondPart))
+                      i   <- chooseInt 0 5
+                      cs  <- replicateM i (arbitrary >>= (\b ->
+                              if b 
+                              then (arbitrary <#> (\(ArbitraryPnChars c) -> c))
+                              else (arbitrary <#> (\(ArbitraryPnChars c) -> "." <> c))))
+                      pure (fold cs)
+    pure (ABlankNodeLabel ("_:" <> firstPart <> secondPart))
 
+
+newtype APNameNS = APNameNS String
+
+instance aPNameNS :: Arbitrary APNameNS where
+  arbitrary = arbitrary >>= (\b -> 
+                if b 
+                then  (arbitrary <#> (\(ArbitraryPnPrefix p) -> APNameNS (p <> ":")))
+                else pure $ APNameNS ":"
+               ) 
+
+newtype APNameLN = APNameLN String   
+
+instance aPNameLN :: Arbitrary APNameLN where
+  arbitrary = do
+    ns  <- arbitrary <#> (\(APNameNS n) -> n) 
+    loc <- arbitrary <#> (\(ArbitraryPnLocal l) -> l)
+    pure (APNameLN (ns <> loc))
+
+newtype AIRIRef = AIRIRef String
+
+instance aIRIRef :: Arbitrary AIRIRef where
+    arbitrary = do
+      i <- chooseInt 0 200
+      c <- replicateM i (genUnicodeChar `suchThat` (\c -> 
+                          (c > '\x0020') && 
+                          (not (elem c ['<', '>','"', '{', '}', '|', '^', '`', '\\', '\t', '\n', '\r']))  
+                         ))
+      pure (AIRIRef ("<" <> (foldMap singleton c) <> ">"))
 
 main :: Eff (QCRunnerEffects () ) Unit  
 main = run [consoleReporter] do 
@@ -493,7 +518,7 @@ main = run [consoleReporter] do
       it "should fail on invalid input" do
         (isLeft (runParser nil "( ") `shouldEqual` true) 
 
-    describe "parse [168] echar" do
+    describe "parse [160] echar" do
       it "should parse valid content" do
         (runParser echar "\\t") `shouldEqual` (Right "\\t")
         (runParser echar "\\b") `shouldEqual` (Right "\\b")
@@ -658,7 +683,47 @@ main = run [consoleReporter] do
     describe "parse [142] blank_node_label" do
       it "should parse some basic input" do
         (runParser blank_node_label "_:a") `shouldEqual` (Right "_:a")
-        --(runParser blank_node_label "_:asdf") `shouldEqual` (Right "_:asdf")
+        (runParser blank_node_label "_:asdf") `shouldEqual` (Right "_:asdf")  
+      it "should fail on invalid input" do 
+        (isLeft (runParser blank_node_label "a")) `shouldEqual` true 
+        (isLeft (runParser blank_node_label ":_a.")) `shouldEqual` true 
+      it "should pass quickCheck" do 
+        liftEff' (quickCheck (\(ABlankNodeLabel b) -> (runParser blank_node_label b) === Right(b))) 
 
+    describe "parse [168] pn_prefix" do 
+      it "should parse some valid input" do
+        (runParser pn_prefix "asdf")  `shouldEqual` (Right "asdf")
+      it "should fail on some invalid input" do 
+        (isLeft (runParser pn_prefix "0"))  `shouldEqual` true 
+      it "should pass quickCheck" do 
+        liftEff' (quickCheck (\(ArbitraryPnPrefix p) -> (runParser pn_prefix p) === (Right p)))
 
-    
+    describe "parse [141] pname_ln" do
+      it "should parse valid input" do 
+        (runParser pname_ln "a:a")  `shouldEqual` (Right "a:a")
+        (runParser pname_ln "asdf:asdf")  `shouldEqual` (Right "asdf:asdf")
+      it "should fail on invalid input" do 
+        (isLeft (runParser pname_ln "a:"))  `shouldEqual` true
+      it "should pass quickCheck" do
+        liftEff' (quickCheck (\(APNameLN n) -> (runParser pname_ln n) === (Right n)))
+
+    describe "parse [140] pname_ns" do
+      it "should parse some basic input" do
+        (runParser pname_ns ":") `shouldEqual` (Right ":")
+        (runParser pname_ns "a:") `shouldEqual` (Right "a:")
+        (runParser pname_ns "asdf:") `shouldEqual` (Right "asdf:")
+      it "should fail on invalid input" do 
+        (isLeft (runParser pname_ns "a")) `shouldEqual` true
+        (isLeft (runParser pname_ns "0:")) `shouldEqual` true
+      it "should pass quickCheck" do
+        liftEff' (quickCheck (\(APNameNS n) -> (runParser pname_ns n) === Right(n))) 
+
+    describe "parse [139] iriref" do
+      it "should parse some basic input" do
+        (runParser iriref "<a>") `shouldEqual` (Right "<a>")
+        (runParser iriref "<http://slashdot.org>") `shouldEqual` (Right "<http://slashdot.org>")
+      it "should fail on some invalid input" do
+        (isLeft (runParser iriref "<a")) `shouldEqual` true 
+        (isLeft (runParser iriref "<<>")) `shouldEqual` true 
+      it "should pass quickCheck" do
+        liftEff' (quickCheck (\(AIRIRef i) -> (runParser iriref i) === Right(i))) 
