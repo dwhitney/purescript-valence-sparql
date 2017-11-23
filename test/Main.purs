@@ -370,6 +370,7 @@ instance aIRIRef :: Arbitrary AIRIRef where
                          ))
       pure (AIRIRef ("<" <> (foldMap singleton c) <> ">"))
 
+
 main :: Eff (QCRunnerEffects () ) Unit  
 main = run [consoleReporter] do 
   describe "Valence.SPARQL.Parser" do
@@ -727,3 +728,5 @@ main = run [consoleReporter] do
         (isLeft (runParser iriref "<<>")) `shouldEqual` true 
       it "should pass quickCheck" do
         liftEff' (quickCheck (\(AIRIRef i) -> (runParser iriref i) === Right(i))) 
+
+    

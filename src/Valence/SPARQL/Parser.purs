@@ -13,9 +13,12 @@ import Text.Parsing.StringParser.String (alphaNum, anyDigit, anyLetter, oneOf, s
 
 type LexicalToken = Parser String
 
+lexicalToken :: Parser String -> LexicalToken
+lexicalToken parser = parser <* (many ws)
+
 -- | [139]  	IRIREF	  ::=  	'<' ([^<>"{}|^`\]-[#x00-#x20])* '>'
 iriref :: LexicalToken
-iriref = lAngleBracket <> middlePart <> rAngleBracket
+iriref = lexicalToken (lAngleBracket <> middlePart <> rAngleBracket)
   where
     lAngleBracket = string "<"
     rAngleBracket = string ">"
@@ -26,32 +29,32 @@ iriref = lAngleBracket <> middlePart <> rAngleBracket
 
 -- | [140]  	PNAME_NS	  ::=  	PN_PREFIX? ':'
 pname_ns :: LexicalToken
-pname_ns = optional_pn_prefix <> (string ":") 
+pname_ns = lexicalToken (optional_pn_prefix <> (string ":") )
   where
     optional_pn_prefix = option "" pn_prefix
 
 -- | [141]  	PNAME_LN	  ::=  	PNAME_NS PN_LOCAL
 pname_ln :: LexicalToken
-pname_ln = pname_ns <> pn_local
+pname_ln = lexicalToken(pname_ns <> pn_local)
 
 -- | [142]  	BLANK_NODE_LABEL	  ::=  	'_:' ( PN_CHARS_U | [0-9] ) ((PN_CHARS|'.')* PN_CHARS)?
 blank_node_label :: LexicalToken
-blank_node_label = 
+blank_node_label = lexicalToken ( 
   (string "_:" <> (pn_chars_u <|> (singleton <$> anyDigit))) <>
-  (option "" ((fold <$> (many (pn_chars <|> ((string ".") <* (lookAhead pn_chars)) )))))
+  (option "" ((fold <$> (many (pn_chars <|> ((string ".") <* (lookAhead pn_chars)) ))))))
 
 
 -- | [143]  	VAR1	  ::=  	'?' VARNAME
 var1 :: LexicalToken
-var1 = string "?" <> varname
+var1 = lexicalToken (string "?" <> varname)
 
 -- | [144]  	VAR2	  ::=  	'$' VARNAME
 var2 :: LexicalToken
-var2 = string "$" <> varname
+var2 = lexicalToken (string "$" <> varname)
 
 -- | [145]  	LANGTAG	  ::=  '@' [a-zA-Z]+ ('-' [a-zA-Z0-9]+)*	
 langtag :: LexicalToken
-langtag = at <> letters <> dashAlphaNums
+langtag = lexicalToken (at <> letters <> dashAlphaNums)
   where 
     at = string "@"
     letters = fold <$> (many1 $ singleton <$> anyLetter) 
@@ -59,21 +62,21 @@ langtag = at <> letters <> dashAlphaNums
 
 -- | [146] INTEGER ::= [0-9]+
 integer :: LexicalToken
-integer = fold <$> (many1 $ singleton <$> anyDigit)
+integer = lexicalToken (fold <$> (many1 $ singleton <$> anyDigit))
 
 -- | [147] DECIMAL ::= [0-9]* '.' [0-9]+
 decimal :: LexicalToken
-decimal = possiblyDigits <> dot <> integer 
+decimal = lexicalToken (possiblyDigits <> dot <> integer)
 
 possiblyDigits :: Parser String
-possiblyDigits = fold <$> (many $ singleton <$> anyDigit)
+possiblyDigits = lexicalToken (fold <$> (many $ singleton <$> anyDigit))
 
 dot :: Parser String
-dot = string "."
+dot = lexicalToken (string ".")
 
 -- | [148] DOUBLE ::= [0-9]+ '.' [0-9]* EXPONENT | '.' ([0-9])+ EXPONENT | ([0-9])+ EXPONENT
 double :: LexicalToken
-double = try one <|> try two <|> try three 
+double = lexicalToken (try one <|> try two <|> try three)
   where
     one = integer <> dot <> possiblyDigits <> exponent
     two = dot <> integer <> exponent 
@@ -81,31 +84,31 @@ double = try one <|> try two <|> try three
 
 -- | [149] INTEGER_POSITIVE ::= '+' INTEGER
 integer_positive :: LexicalToken
-integer_positive = (string "+") <> integer
+integer_positive = lexicalToken ((string "+") <> integer)
 
 -- | [150] DECIMAL_POSITIVE ::= '+' DECIMAL
 decimal_positive :: LexicalToken
-decimal_positive = (string "+") <> decimal 
+decimal_positive = lexicalToken ((string "+") <> decimal)
 
 -- | [151] DOUBLE_POSITIVE ::= '+' DOUBLE
 double_positive :: LexicalToken
-double_positive = (string "+") <> double 
+double_positive = lexicalToken ((string "+") <> double)
 
 -- | [152] INTEGER_NEGATIVE ::= '-' INTEGER
 integer_negative :: LexicalToken
-integer_negative = (string "-") <> integer
+integer_negative = lexicalToken ((string "-") <> integer)
 
 -- | [153] DECIMAL_NEGATIVE ::= '-' DECIMAL
 decimal_negative :: LexicalToken
-decimal_negative = (string "-") <> decimal
+decimal_negative = lexicalToken ((string "-") <> decimal)
 
 -- | [154] DOUBLE_NEGATIVE ::= '-' DOUBLE
 double_negative :: LexicalToken
-double_negative = (string "-") <> double 
+double_negative = lexicalToken ((string "-") <> double)
 
 -- | [155] EXPONENT ::= [eE] [+-]? [0-9]+
 exponent :: LexicalToken
-exponent = e <> sign <> nums 
+exponent = lexicalToken (e <> sign <> nums)
   where
     e     = singleton <$> oneOf ['e', 'E']
     sign  = (option "" (singleton <$> oneOf ['-', '+']))
@@ -113,21 +116,21 @@ exponent = e <> sign <> nums
 
 -- | [156] STRING_LITERAL1 ::= "'" ( ([^#x27#x5C#xA#xD]) | ECHAR )* "'"
 string_literal1 :: LexicalToken
-string_literal1 = string_literal "'" allowedChar
+string_literal1 = lexicalToken (string_literal "'" allowedChar)
   where 
     allowedChar = anyButThese <|> echar
     anyButThese = singleton <$> (satisfy (\c -> c /= '\x0027' && c /= '\x0005C' && c /= '\x000D'))
 
 -- | [157] STRING_LITERAL2 ::= '"' ( ([^#x22#x5C#xA#xD]) | ECHAR )* '"'
 string_literal2 :: LexicalToken
-string_literal2 = string_literal "\"" allowedChar
+string_literal2 = lexicalToken (string_literal "\"" allowedChar)
   where 
     allowedChar = anyButThese <|> echar
     anyButThese = singleton <$> (satisfy (\c -> c /= '\x0022' && c /= '\x0005C' && c /= '\x000D'))
 
 -- | [158] STRING_LITERAL_LONG1 ::= "'''" ( ( "'" | "''" )? ( [^'\] | ECHAR ) )* "'''"
 string_literal_long1 :: LexicalToken
-string_literal_long1 = string_literal "'''" content
+string_literal_long1 = lexicalToken (string_literal "'''" content)
   where
     content = quotes <> (singleton <$> satisfy (\c -> c /= '\'' && c /= '\\') <|> echar) 
     quotes = try (option "" (doubleSingleQuote <|> singleSingleQuote))
@@ -137,7 +140,7 @@ string_literal_long1 = string_literal "'''" content
 
 -- | [159] STRING_LITERAL_LONG2 ::= '"""' ( ( '"' | '""' )? ( [^"\] | ECHAR ) )* '"""'
 string_literal_long2 :: LexicalToken
-string_literal_long2 = string_literal "\"\"\"" content
+string_literal_long2 = lexicalToken (string_literal "\"\"\"" content)
   where
     content = quotes <> (singleton <$> satisfy (\c -> c /= '"' && c /= '\\') <|> echar) 
     quotes = try (option "" (doubleSingleQuote <|> singleSingleQuote))
@@ -154,20 +157,20 @@ string_literal quoteType allowedChar = do
 
 -- | [160] ECHAR ::= '\' [tbnrf\"']
 echar :: LexicalToken
-echar = (string "\\") <> (singleton <$> (oneOf $ toCharArray "tbdrf\"'"))
+echar = lexicalToken ((string "\\") <> (singleton <$> (oneOf $ toCharArray "tbdrf\"'")))
 
 -- | [161] NIL ::= '(' WS* ')'
 nil :: LexicalToken
-nil = do
+nil = lexicalToken (do
   _ <- string "("
   w <- many ws
   _ <- string ")"
-  pure ("(" <> (fold w) <> ")")
+  pure ("(" <> (fold w) <> ")"))
 
 
 -- | [163] ANON ::= '[' WS* ']'
 anon :: LexicalToken
-anon = do
+anon = lexicalToken $ do
   _ <- string "["
   w <- many ws
   _ <- string "]"
@@ -184,7 +187,7 @@ ws = singleton <$> satisfy (\c ->
 
 -- | [164] PN_CHARS_BASE ::= [A-Z] | [a-z] | [#x00C0-#x00D6] | [#x00D8-#x00F6] | [#x00F8-#x02FF] | [#x0370-#x037D] | [#x037F-#x1FFF] | [#x200C-#x200D] | [#x2070-#x218F] | [#x2C00-#x2FEF] | [#x3001-#xD7FF] | [#xF900-#xFDCF] | [#xFDF0-#xFFFD] | [#x10000-#xEFFFF]
 pn_chars_base :: LexicalToken         
-pn_chars_base = singleton <$> (satisfy (\c ->
+pn_chars_base = lexicalToken (singleton <$> (satisfy (\c ->
   (c >= 'A' && c <= 'Z')  ||
   (c >= 'a' && c <= 'z')  ||
   (c >= '\x00C0' && c <= '\x00D6') ||
@@ -199,15 +202,15 @@ pn_chars_base = singleton <$> (satisfy (\c ->
   (c >= '\xF900' && c <= '\xFDCF') ||
   (c >= '\xFDF0' && c <= '\xFFFD') -- ||
   --(c >= '\x10000'&& c <= '\xEFFFF')
-))
+)))
 
 -- | [165] PN_CHARS_U ::= PN_CHARS_BASE | '_'
 pn_chars_u :: LexicalToken
-pn_chars_u = pn_chars_base <|> string "_"
+pn_chars_u = lexicalToken (pn_chars_base <|> string "_")
 
 -- | [166] VARNAME ::= ( PN_CHARS_U | [0-9] ) ( PN_CHARS_U | [0-9] | #x00B7 | [#x0300-#x036F] | [#x203F-#x2040] )*
 varname :: LexicalToken 
-varname = (<>) <$> begin <*> (fold <$> (many end))
+varname = lexicalToken (begin <> (fold <$> (many end)))
   where 
     begin = pn_chars_u <|> (singleton <$> anyDigit)
     end = pn_chars_u <|> (singleton <$> satisfy (\c -> 
@@ -219,37 +222,37 @@ varname = (<>) <$> begin <*> (fold <$> (many end))
 
 -- | [167] PN_CHARS ::= PN_CHARS_U | '-' | [0-9] | #x00B7 | [#x0300-#x036F] | [#x203F-#x2040]
 pn_chars :: LexicalToken
-pn_chars = 
+pn_chars = lexicalToken ( 
   pn_chars_u <|> 
   string "-" <|> 
   (singleton <$> anyDigit) <|> 
-  singleton <$> (satisfy (\c -> c == '\x00B7' || (c >= '\x0300' && c <= '\x036F') || (c >= '\x203F' && c <= '\x2040')))
+  singleton <$> (satisfy (\c -> c == '\x00B7' || (c >= '\x0300' && c <= '\x036F') || (c >= '\x203F' && c <= '\x2040'))))
 
 -- | [168] PN_PREFIX ::= PN_CHARS_BASE ((PN_CHARS|'.')* PN_CHARS)?
 pn_prefix :: LexicalToken
-pn_prefix = pn_chars_base <> (option "" moreChars)
+pn_prefix = lexicalToken (pn_chars_base <> (option "" moreChars))
   where 
     moreChars = (fold <$> (many (pn_chars <|> ((string ".") <* (lookAhead pn_chars)))))
 
 
 -- | [169] PN_LOCAL ::= (PN_CHARS_U | ':' | [0-9] | PLX ) ((PN_CHARS | '.' | ':' | PLX)* (PN_CHARS | ':' | PLX) )?
 pn_local :: LexicalToken
-pn_local = (<>) <$> firstPart <*> (option "" midAndFinal) 
+pn_local = lexicalToken (firstPart <> (option "" midAndFinal))
   where
-    dotAndMore  = (<>) <$> string "." <*> (try (pn_chars <|> plx <|> string "." <|> string ":"))
+    dotAndMore  = string "." <> (try (pn_chars <|> plx <|> string "." <|> string ":"))
     firstPart   = pn_chars_u <|> plx <|> string ":" <|> (singleton <$> anyDigit) 
     middlePart  = many (plx <|> pn_chars <|> dotAndMore <|> string ":")
     finalPart   = option "" (pn_chars <|> plx <|> string ":" )
-    midAndFinal = (<>) <$> (fold <$> middlePart) <*> finalPart
+    midAndFinal = (fold <$> middlePart) <> finalPart
   
 
 -- | [170] PLX ::= PERCENT | PN_LOCAL_ESC
 plx :: LexicalToken
-plx = percent <|> pn_local_esc
+plx = lexicalToken (percent <|> pn_local_esc)
 
 -- | [171] PERCENT ::= '%' HEX HEX
 percent :: LexicalToken
-percent = do
+percent = lexicalToken $ do
   _   <- string "%"
   h1  <- hex
   h2  <- hex
@@ -257,11 +260,11 @@ percent = do
 
 -- | [172] HEX ::= [0-9] | [A-F] | [a-f]
 hex :: LexicalToken
-hex = singleton <$> (oneOf $ toCharArray "0123456789abcdefABCDEF")
+hex = lexicalToken (singleton <$> (oneOf $ toCharArray "0123456789abcdefABCDEF"))
 
 -- | [173] PN_LOCAL_ESC ::= '\'('_'|'~'|'.'|'-'|'!'|'$'|'&'|"'"|'('|')'|'*'|'+'|' <|>'|';'|'='|'/'|'?'|'#'|'@'| '%' )
 pn_local_esc :: LexicalToken
-pn_local_esc = 
+pn_local_esc = lexicalToken (
   string "\\_"  <|> 
   string "\\~"  <|>
   string "\\."  <|>
@@ -281,4 +284,4 @@ pn_local_esc =
   string "\\?"  <|> 
   string "\\#"  <|> 
   string "\\@"  <|>  
-  string "\\%"
+  string "\\%")
