@@ -7,11 +7,12 @@ import Control.Monad.Eff (Eff)
 import Control.Monad.Gen (chooseInt, suchThat)
 import Data.Char (fromCharCode, toCharCode)
 import Data.Char.Gen (genAlpha, genDigitChar, genUnicodeChar)
-import Data.Either (Either(..), isLeft)
+import Data.Either (Either(..), isLeft, isRight)
 import Data.List.Lazy (elem, fold, foldMap, replicateM)
 import Data.NonEmpty ((:|))
 import Data.String (singleton, toCharArray)
 import Data.String.Gen (genDigitString)
+import Debug.Trace (spy)
 import Test.QuickCheck (class Arbitrary, arbitrary, quickCheck, (===))
 import Test.QuickCheck.Gen (Gen, elements)
 import Test.Spec (describe, it)
@@ -20,7 +21,7 @@ import Test.Spec.QuickCheck (QCRunnerEffects)
 import Test.Spec.Reporter (consoleReporter)
 import Test.Spec.Runner (run)
 import Text.Parsing.StringParser (runParser)
-import Valence.SPARQL.Parser (anon, blank_node_label, decimal, decimal_negative, decimal_positive, double, double_negative, double_positive, echar, exponent, hex, integer, integer_negative, integer_positive, iriref, langtag, nil, percent, plx, pn_chars, pn_chars_base, pn_chars_u, pn_local, pn_local_esc, pn_prefix, pname_ln, pname_ns, string_literal1, string_literal2, string_literal_long1, string_literal_long2, var1, var2, varname, ws)
+import Valence.SPARQL.Parser (SelectClause(..), anon, blank_node_label, decimal, decimal_negative, decimal_positive, double, double_negative, double_positive, echar, exponent, hex, integer, integer_negative, integer_positive, iriref, langtag, nil, percent, plx, pn_chars, pn_chars_base, pn_chars_u, pn_local, pn_local_esc, pn_prefix, pname_ln, pname_ns, selectClause, string_literal1, string_literal2, string_literal_long1, string_literal_long2, var1, var2, varname, ws)
 
 
 newtype ArbitraryPnLocalEsc = ArbitraryPnLocalEsc String 
@@ -729,4 +730,15 @@ main = run [consoleReporter] do
       it "should pass quickCheck" do
         liftEff' (quickCheck (\(AIRIRef i) -> (runParser iriref i) === Right(i))) 
 
-    
+
+    -- | Parsing
+
+    describe "parse some SPARQL query" do 
+      it "parse a simple query" do 
+        let query = """SELECT ?title ?author
+         WHERE
+          {
+            <http://example.org/book/book1> <http://purl.org/dc/elements/1.1/title> ?title .
+          }
+        """ 
+        (runParser selectClause query) `shouldEqual` (Right (SelectClause ["?title", "?author"]))

@@ -9,12 +9,23 @@ import Text.Parsing.StringParser (Parser, try)
 import Text.Parsing.StringParser.Combinators (lookAhead, many1, option)
 import Text.Parsing.StringParser.String (alphaNum, anyDigit, anyLetter, oneOf, satisfy, string)
 
+
+data SelectClause = SelectClause (Array String)
+instance showSelectClause :: Show SelectClause where
+  show (SelectClause vars) = "(SelectClause " <> (show vars) <> ")"
+instance eqSelectClause :: Eq SelectClause where
+  eq (SelectClause vars1) (SelectClause vars2) = vars1 == vars2
+
+-- | Parser
+selectClause :: Parser SelectClause
+selectClause = SelectClause <$> ((string "SELECT ") *> (many (var1)) )
+
 -- | Lexer 
 
 type LexicalToken = Parser String
 
 lexicalToken :: Parser String -> LexicalToken
-lexicalToken parser = parser <* (many ws)
+lexicalToken parser = parser <* (try (many ws))
 
 -- | [139]  	IRIREF	  ::=  	'<' ([^<>"{}|^`\]-[#x00-#x20])* '>'
 iriref :: LexicalToken
